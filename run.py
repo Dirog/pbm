@@ -1,51 +1,69 @@
-import qam
 import utils
-import scipy.io
 import numpy as np
-from math import log
 import matplotlib.pyplot as plt
+#######################################################################################
+tx, rx, bits = utils.read_data('pbm.mat', 100)
+init_means = utils.conditional_mean(rx, tx)
+#######################################################################################
+plot_initial = True
+if plot_initial:
+    plt.figure()
+    plt.scatter(np.real(rx[:,0]), np.imag(rx[:,0]), alpha=0.02)
+    plt.scatter(np.real(rx[:,1]), np.imag(rx[:,1]), alpha=0.02)
+    plt.scatter(np.real(init_means[:,0]), np.imag(init_means[:,0]), marker="x")
+    plt.scatter(np.real(init_means[:,1]), np.imag(init_means[:,1]), marker="x")
+    plt.title('Initial X and Y pol.')
+    plt.xlabel('I')
+    plt.ylabel('Q')
+    plt.grid()
+    plt.show()
+#######################################################################################
+init_ber, init_ser = utils.ber_and_ser(rx, bits)
+init_nmse = utils.nmse(rx, tx)
+print('##################################')
+print("Initial BER: {:e}".format(init_ber))
+print("Initial SER: {:e}".format(init_ser))
+print("Initial NMSE: {:.3f} dB".format(init_nmse))
+#######################################################################################
+def PBM(x, y, d, M):
+    N = len(x); K = 2*M+1
+    U = np.zeros((N, K, K, 2), dtype=np.complex64)
 
-data = scipy.io.loadmat('pbm_test.mat')
+    xp = np.pad(x, (2*M, 2*M))
+    yp = np.pad(y, (2*M, 2*M))
+    for m in range(-M,M+1):
+        for n in range(-M,M+1):
+            i = n + M; j = m + M
+            U[:,i,j,0] = xp[M+j:M+N+j] * np.conj(xp[j+i:N+j+i]) * xp[M+i:M+N+i]
+            U[:,i,j,1] = xp[M+j:M+N+j] * np.conj(yp[j+i:N+j+i]) * yp[M+i:M+N+i] 
+                       
+    U = np.reshape(U, (N, -1))
+    U = np.c_[x, U]
 
-M = 16
-skip = 100
-tx = data['srcSymData'][skip::, :]
-rx = data['eqSymOutData'][skip::, :]
-bits = data['srcPermBitData'][skip * 4::, :]
-
-tx = tx[:tx.shape[0] - skip:, :]
-rx = rx[:rx.shape[0] - skip:, :]
-bits = bits[:bits.shape[0] - skip*4:,:]
-
-means = utils.conditional_mean(rx, tx)
-plt.scatter(np.real(rx[:,0]), np.imag(rx[:,0]), alpha=0.01)
-plt.scatter(np.real(rx[:,1]), np.imag(rx[:,1]), alpha=0.01)
-plt.scatter(np.real(means[:,0]), np.imag(means[:,0]), s=50, marker='x')
-plt.scatter(np.real(means[:,1]), np.imag(means[:,1]), s=50, marker='x')
-plt.legend(['RX X', 'RX Y', 'Mean X', 'Mean Y'], loc='upper right')
-plt.grid()
-plt.show()
-
-constel = qam.constellation(M)
-indexes = qam.demodulate(constel, means[:,0])
-constel_x = means[indexes, 0]
-constel_y = means[indexes, 1]
-rx_data_x = qam.demodulate(rx[:, 0], constel)
-rx_data_y = qam.demodulate(rx[:, 1], constel)
-
-
-ber_x = 1 - np.mean(utils.bitarray(rx_data_x, 16) == bits[:, 0])
-ber_y = 1 - np.mean(utils.bitarray(rx_data_y, 16) == bits[:, 1])
-
-e = rx - tx
-nmse_x = np.sum(np.abs(e[:,0])**2) / np.sum(np.abs(rx[:,0])**2)
-nmse_y = np.sum(np.abs(e[:,1])**2) / np.sum(np.abs(rx[:,1])**2)
-
-ser_x = 1 - np.mean(rx_data_x == utils.bits_to_ints(bits[:,0], M))
-ser_y = 1 - np.mean(rx_data_y == utils.bits_to_ints(bits[:,1], M))
-
-nmse = (nmse_x + nmse_y) / 2
-ber = (ber_x + ber_y) / 2
-ser = (ser_x + ser_y) / 2
-metrics = {'BER' : ber, 'SER' : ser, 'NMSE (dB)': 10*np.log10(nmse)}
-print(metrics)
+    c = np.linalg.lstsq(U, d, rcond=None)
+    return U @ c[0]
+#######################################################################################
+M = 5
+fx = PBM(rx[:,0], rx[:,1], tx[:,0], M)
+fy = PBM(rx[:,1], rx[:,0], tx[:,1], M)
+#######################################################################################
+plot_after_pbm = True
+if plot_after_pbm:
+    plt.figure()
+    plt.scatter(np.real(fx), np.imag(fx), alpha=0.02)
+    plt.scatter(np.real(rx[:,0]), np.imag(rx[:,0]), alpha=0.02)
+    plt.title('After PBM IQ (only X pol.)')
+    plt.xlabel('I')
+    plt.ylabel('Q')
+    plt.grid()
+    plt.show()
+#######################################################################################
+rx_pbm = np.zeros(rx.shape, dtype=np.complex64)
+rx_pbm[:,0] = fx; rx_pbm[:,1] = fy
+pbm_ber, pbm_ser = utils.ber_and_ser(rx_pbm, bits)
+pbm_nmse = utils.nmse(rx_pbm, tx)
+print('##################################')
+print("Post PBM BER: {:e}".format(pbm_ber))
+print("Post PBM SER: {:e}".format(pbm_ser))
+print("Post PBM NMSE: {:.3f} dB".format(pbm_nmse))
+print('##################################')
